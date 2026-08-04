@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Detalhes da Máquina — Painel de Monitoramento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0E141B; --panel:#161F29; --panel-2:#1C2733; --border:#28323E;
+    --text:#E7ECF2; --text-dim:#8CA0B3; --text-faint:#5A6B7B;
+    --green:#35D07F; --green-dim:#1B7A4C; --amber:#F2A93B; --amber-dim:#9C6A17;
+    --red:#EF5654; --red-dim:#8F2B2A; --blue:#4FA3E3; --blue-dim:#2C5F87; --grid:#1E2833;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 28px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/28px 100%,
+      var(--bg);
+    color:var(--text); font-family:'Inter', sans-serif; min-height:100vh; padding:20px;
+  }
+  .mono{ font-family:'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 22px; background:var(--panel); border:1px solid var(--border);
+    border-radius:6px; margin-bottom:16px; flex-wrap:wrap; gap:12px;
+  }
+  .brand{ display:flex; align-items:center; gap:14px; }
+  .brand .dot{ width:10px; height:10px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .brand h1{ font-family:'Rajdhani', sans-serif; font-weight:700; font-size:20px; letter-spacing:.5px; text-transform:uppercase; }
+  .brand p{ color:var(--text-dim); font-size:12px; margin-top:2px; }
+  .back{ color:var(--blue); text-decoration:none; font-size:13px; font-weight:600; }
+  .back:hover{ text-decoration:underline; }
+
+  .layout{ display:grid; grid-template-columns:2.2fr 1fr; gap:16px; align-items:start; }
+  @media (max-width:900px){ .layout{ grid-template-columns:1fr; } }
+
+  .gauges-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:16px; }
+  .gauge-card{ background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:18px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .gauge-card svg{ width:110px; height:110px; }
+  .gauge-card .val{ font-family:'Rajdhani',sans-serif; font-size:22px; font-weight:700; }
+  .gauge-card .lbl{ font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.6px; }
+
+  .chart-card{ background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:16px 18px; margin-bottom:14px; }
+  .chart-card h2{ font-family:'Rajdhani',sans-serif; font-size:14px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-dim); margin-bottom:10px; }
+  .chart-card canvas{ max-height:180px; }
+
+  .side-card{ background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:18px; margin-bottom:14px; }
+  .side-card h2{ font-family:'Rajdhani',sans-serif; font-size:14px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-dim); margin-bottom:12px; }
+
+  .status-box{
+    text-align:center; padding:22px 14px; border-radius:6px; border:1px solid var(--border);
+    background:var(--panel-2); transition:.25s;
+  }
+  .status-box .estado{ font-family:'Rajdhani',sans-serif; font-size:24px; font-weight:700; margin-bottom:6px; }
+  .status-box .media{ font-size:12px; color:var(--text-dim); }
+  .status-box.desligada{ border-color:var(--text-faint); } .status-box.desligada .estado{ color:var(--text-faint); }
+  .status-box.vazia{ border-color:var(--blue-dim); } .status-box.vazia .estado{ color:var(--blue); }
+  .status-box.produzindo{ border-color:var(--green-dim); } .status-box.produzindo .estado{ color:var(--green); }
+  .status-box.fora{ border-color:var(--amber-dim); } .status-box.fora .estado{ color:var(--amber); }
+
+  .logica{
+    margin-top:14px; background:var(--panel-2); border:1px solid var(--border); border-radius:5px;
+    padding:10px 12px; font-size:11px; color:var(--text-dim); line-height:1.7; overflow-x:auto;
+  }
+  .logica b{ color:var(--text); }
+
+  .meta-row{ display:flex; justify-content:space-between; font-size:12px; color:var(--text-dim); padding:6px 0; border-bottom:1px dashed var(--border); }
+  .meta-row:last-child{ border-bottom:none; }
+  .meta-row span:last-child{ color:var(--text); font-family:'IBM Plex Mono', monospace; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="dot" id="mqtt-dot"></div>
+    <div>
+      <h1 id="titulo-maquina">Detalhes da Máquina</h1>
+      <p id="subtitulo-maquina">—</p>
+    </div>
+  </div>
+  <a class="back" href="painel.html">← Voltar ao painel</a>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="gauges-row" id="gauges-row"></div>
+
+    <div class="chart-card">
+      <h2>Corrente (A)</h2>
+      <canvas id="chartCorrente"></canvas>
+    </div>
+    <div class="chart-card">
+      <h2>Tensão (V)</h2>
+      <canvas id="chartTensao"></canvas>
+    </div>
+    <div class="chart-card">
+      <h2>Rotação (Hz)</h2>
+      <canvas id="chartRotacao"></canvas>
+    </div>
+  </div>
+
+  <div>
+    <div class="side-card">
+      <h2>Status de Produção</h2>
+      <div class="status-box desligada" id="statusBox">
+        <div class="estado" id="statusEstado">Máquina desligada</div>
+        <div class="media mono" id="statusMedia">mediaCorrente = 0.00 A</div>
+      </div>
+      <div class="logica mono">
+if (mediaCorrente == 0.0) {<br>
+&nbsp;&nbsp;<b>"Máquina desligada"</b><br>
+} else if (mediaCorrente >= 0.70 && mediaCorrente <= 2.0) {<br>
+&nbsp;&nbsp;<b>"Máquina vazia"</b><br>
+} else if (mediaCorrente >= 2.1 && mediaCorrente <= 4.0) {<br>
+&nbsp;&nbsp;<b>"Máquina produzindo"</b><br>
+}
+      </div>
+    </div>
+
+    <div class="side-card">
+      <h2>Informações</h2>
+      <div class="meta-row"><span>ID</span><span id="meta-id">—</span></div>
+      <div class="meta-row"><span>Local</span><span id="meta-local">—</span></div>
+      <div class="meta-row"><span>Status</span><span id="meta-status">—</span></div>
+      <div class="meta-row"><span>Última leitura</span><span id="meta-ts">—</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- Controle de acesso ---------------------------------------------------
+if (sessionStorage.getItem('painel_logado') !== 'true') {
+  window.location.href = 'login.html';
+}
+
+// --- Identifica qual máquina foi selecionada (via ?id=) -------------------
+const params = new URLSearchParams(window.location.search);
+const maquinaId = params.get('id') || 'MT-01';
+
+// Cadastro básico das máquinas (mesma nomenclatura do painel principal)
+const CADASTRO = {
+  'MT-01':  { nome:'Carnevalle',       local:'Bloco B' },
+  'TR-02':  { nome:'Bomba de água',    local:'Casa de bomba' },
+  'INV-03': { nome:'Motor de grãos',   local:'Fábrica 01' }
+};
+const info = CADASTRO[maquinaId] || { nome: maquinaId, local:'—' };
+document.getElementById('titulo-maquina').textContent = info.nome;
+document.getElementById('subtitulo-maquina').textContent = maquinaId + ' · ' + info.local;
+document.getElementById('meta-id').textContent = maquinaId;
+document.getElementById('meta-local').textContent = info.local;
+
+// Faixas usadas nos gauges
+const LIMITES = {
+  corrente: { min:0, max:50,   warn:55,   danger:60 },
+  tensao:   { min:0, max:230,  warn:240,  danger:250 },
+  rotacao:  { min:0, max:2000, warn:2100, danger:2200 }
+};
+
+// Valores atuais (o que alimenta os gauges)
+let valores = { corrente:0, tensao:220, rotacao:1800 };
+
+// Histórico para os gráficos e para o cálculo da média da corrente
+const HIST_MAX = 25;
+let histCorrente = [];
+let histTensao = [];
+let histRotacao = [];
+let histLabels = [];
+let ultimasCorrentes = []; // usada para a mediaCorrente
+
+function gaugeSVG(val, lim, cor){
+  const pct = Math.max(0, Math.min(1, (val - lim.min) / (lim.max - lim.min)));
+  const r = 42, circ = 2 * Math.PI * r;
+  const offset = circ * (1 - pct);
+  let color = 'var(--green)';
+  if (val >= lim.danger) color = 'var(--red)';
+  else if (val >= lim.warn) color = 'var(--amber)';
+  return `<svg viewBox="0 0 110 110">
+    <circle cx="55" cy="55" r="${r}" fill="none" stroke="#28323E" stroke-width="8"/>
+    <circle cx="55" cy="55" r="${r}" fill="none" stroke="${color}" stroke-width="8"
+      stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"
+      transform="rotate(-90 55 55)" style="transition:stroke-dashoffset .6s ease, stroke .6s ease"/>
+  </svg>`;
+}
+
+function renderGauges(){
+  const row = document.getElementById('gauges-row');
+  row.innerHTML = `
+    <div class="gauge-card">
+      <div style="position:relative">
+        ${gaugeSVG(valores.corrente, LIMITES.corrente)}
+        <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">
+          <span class="val mono">${valores.corrente.toFixed(2)}</span>
+        </div>
+      </div>
+      <span class="lbl">Corrente (A)</span>
+    </div>
+    <div class="gauge-card">
+      <div style="position:relative">
+        ${gaugeSVG(valores.tensao, LIMITES.tensao)}
+        <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">
+          <span class="val mono">${valores.tensao.toFixed(0)}</span>
+        </div>
+      </div>
+      <span class="lbl">Tensão (V)</span>
+    </div>
+    <div class="gauge-card">
+      <div style="position:relative">
+        ${gaugeSVG(valores.rotacao, LIMITES.rotacao)}
+        <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">
+          <span class="val mono">${valores.rotacao.toFixed(0)}</span>
+        </div>
+      </div>
+      <span class="lbl">Rotação (Hz)</span>
+    </div>`;
+}
+
+// --- Lógica de status de produção (equivalente em JS ao código em C) ------
+function avaliarStatus(mediaCorrente){
+  const box = document.getElementById('statusBox');
+  const estadoEl = document.getElementById('statusEstado');
+  const mediaEl = document.getElementById('statusMedia');
+  mediaEl.textContent = `mediaCorrente = ${mediaCorrente.toFixed(2)} A`;
+
+  let texto, classe;
+  if (mediaCorrente === 0.0) {
+    texto = 'Máquina desligada'; classe = 'desligada';
+  } else if (mediaCorrente >= 0.70 && mediaCorrente <= 2.0) {
+    texto = 'Máquina vazia'; classe = 'vazia';
+  } else if (mediaCorrente >= 2.1 && mediaCorrente <= 4.0) {
+    texto = 'Máquina produzindo'; classe = 'produzindo';
+  } else {
+    texto = 'Fora da faixa monitorada'; classe = 'fora';
+  }
+  estadoEl.textContent = texto;
+  box.className = 'status-box ' + classe;
+}
+
+function atualizarMediaCorrente(){
+  ultimasCorrentes.push(valores.corrente);
+  ultimasCorrentes = ultimasCorrentes.slice(-5); // média das últimas 5 leituras
+  const media = ultimasCorrentes.reduce((a,b) => a+b, 0) / ultimasCorrentes.length;
+  avaliarStatus(media);
+}
+
+// --- Gráficos (Chart.js) ---------------------------------------------------
+function chartBase(ctx, cor){
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: cor, backgroundColor: cor + '22',
+      borderWidth: 2, tension: 0.35, fill: true, pointRadius: 0 }] },
+    options: {
+      responsive:true, animation:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ color:'#5A6B7B', maxTicksLimit:6 }, grid:{ color:'#1E2833' } },
+        y:{ ticks:{ color:'#5A6B7B' }, grid:{ color:'#1E2833' } }
+      }
+    }
+  });
+}
+const chartCorrente = chartBase(document.getElementById('chartCorrente'), '#35D07F');
+const chartTensao   = chartBase(document.getElementById('chartTensao'),   '#4FA3E3');
+const chartRotacao  = chartBase(document.getElementById('chartRotacao'),  '#F2A93B');
+
+function pushHistorico(){
+  const label = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  histLabels.push(label);
+  histCorrente.push(valores.corrente);
+  histTensao.push(valores.tensao);
+  histRotacao.push(valores.rotacao);
+  histLabels = histLabels.slice(-HIST_MAX);
+  histCorrente = histCorrente.slice(-HIST_MAX);
+  histTensao = histTensao.slice(-HIST_MAX);
+  histRotacao = histRotacao.slice(-HIST_MAX);
+
+  chartCorrente.data.labels = histLabels; chartCorrente.data.datasets[0].data = histCorrente; chartCorrente.update('none');
+  chartTensao.data.labels = histLabels;   chartTensao.data.datasets[0].data = histTensao;     chartTensao.update('none');
+  chartRotacao.data.labels = histLabels;  chartRotacao.data.datasets[0].data = histRotacao;   chartRotacao.update('none');
+}
+
+function marcarStatusGeral(status){
+  document.getElementById('meta-status').textContent = status;
+}
+
+function tick(){
+  renderGauges();
+  pushHistorico();
+  atualizarMediaCorrente();
+  document.getElementById('meta-ts').textContent = new Date().toLocaleTimeString('pt-BR');
+}
+
+// --- CONEXÃO MQTT (mesmo broker/tópico da ESP32) ---------------------------
+// Somente a máquina MT-01 recebe leituras reais da ESP32 neste projeto.
+// As demais são simuladas aqui para fins de demonstração do layout/gráficos.
+const brokerUrl = 'wss://broker.hivemq.com:8884/mqtt';
+const client = mqtt.connect(brokerUrl);
+const topico = 'sm_wortex_projeto/leituras';
+
+client.on('connect', function () {
+  document.getElementById('mqtt-dot').style.background = 'var(--green)';
+  client.subscribe(topico);
+});
+
+client.on('message', function (topic, payload) {
+  if (topic === topico && maquinaId === 'MT-01') {
+    try {
+      const dados = JSON.parse(payload.toString());
+      if (dados.corrente !== undefined) valores.corrente = dados.corrente;
+      if (dados.tensao !== undefined)   valores.tensao = dados.tensao;
+      // rotação não é publicada pela ESP32 ainda: pequena variação simulada
+      valores.rotacao = 1800 + (Math.random() * 20 - 10);
+
+      let worst = 'operacional';
+      if (valores.corrente >= LIMITES.corrente.danger) worst = 'falha';
+      else if (valores.corrente >= LIMITES.corrente.warn) worst = 'atencao';
+      marcarStatusGeral(worst);
+
+      tick();
+    } catch (e) {
+      console.error('Erro ao processar o JSON do MQTT:', e);
+    }
+  }
+});
+
+// Modo de simulação para máquinas que ainda não publicam via MQTT
+if (maquinaId !== 'MT-01') {
+  marcarStatusGeral('operacional');
+  setInterval(() => {
+    // caminha aleatoriamente dentro de faixas plausíveis, incluindo períodos parada/vazia/produzindo
+    const r = Math.random();
+    let alvo;
+    if (r < 0.15) alvo = 0;                          // desligada
+    else if (r < 0.5) alvo = 0.7 + Math.random()*1.3; // vazia
+    else alvo = 2.1 + Math.random()*1.9;              // produzindo
+    valores.corrente = alvo;
+    valores.tensao = 218 + Math.random()*6;
+    valores.rotacao = 1780 + Math.random()*40;
+    tick();
+  }, 3000);
+}
+
+renderGauges();
+tick();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel de Monitoramento — Máquinas e Equipamentos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Importando MQTT.js para receber os dados da ESP32 -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#0E141B; --panel:#161F29; --panel-2:#1C2733; --border:#28323E;
+    --text:#E7ECF2; --text-dim:#8CA0B3; --text-faint:#5A6B7B;
+    --green:#35D07F; --green-dim:#1B7A4C; --amber:#F2A93B; --amber-dim:#9C6A17;
+    --red:#EF5654; --red-dim:#8F2B2A; --blue:#4FA3E3; --blue-dim:#2C5F87; --grid:#1E2833;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 28px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/28px 100%,
+      var(--bg);
+    color:var(--text); font-family:'Inter', sans-serif; min-height:100vh; padding:20px;
+  }
+  .mono{ font-family:'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 22px; background:var(--panel); border:1px solid var(--border);
+    border-radius:6px; margin-bottom:16px; flex-wrap:wrap; gap:12px;
+  }
+  .brand{ display:flex; align-items:center; gap:14px; }
+  .brand .dot{ width:10px; height:10px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .brand h1{ font-family:'Rajdhani', sans-serif; font-weight:700; font-size:22px; letter-spacing:.5px; text-transform:uppercase; }
+  .brand p{ color:var(--text-dim); font-size:12px; margin-top:2px; }
+  .head-right{ display:flex; align-items:center; gap:16px; }
+  #clock{ font-size:14px; color:var(--text-dim); }
+  #clock span{ color:var(--text); }
+  .btn-logout{
+    background:var(--panel-2); color:var(--text-dim); border:1px solid var(--border);
+    padding:7px 14px; border-radius:20px; font-size:12px; cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .btn-logout:hover{ border-color:var(--red-dim); color:var(--red); }
+
+  .summary{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:16px; }
+  .summary .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:14px 16px;
+    border-left:3px solid var(--border);
+  }
+  .summary .card .num{ font-family:'Rajdhani',sans-serif; font-size:26px; font-weight:700; line-height:1; }
+  .summary .card .lbl{ font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.6px; margin-top:6px; }
+  .summary .op{ border-left-color:var(--green); } .summary .op .num{ color:var(--green); }
+  .summary .at{ border-left-color:var(--amber); } .summary .at .num{ color:var(--amber); }
+  .summary .fa{ border-left-color:var(--red); } .summary .fa .num{ color:var(--red); }
+  .summary .ma{ border-left-color:var(--blue); } .summary .ma .num{ color:var(--blue); }
+  .summary .bill{ border-left-color:#a855f7; background:#1a1528; }
+  .summary .bill .num{ color:#c084fc; font-size:22px; }
+
+  .filters{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+  .filter-btns{ display:flex; gap:8px; flex-wrap:wrap; }
+  .filters button{
+    background:var(--panel); color:var(--text-dim); border:1px solid var(--border);
+    padding:7px 14px; border-radius:20px; font-size:12px; cursor:pointer; font-family:'Inter',sans-serif; transition:.15s;
+  }
+  .filters button:hover{ border-color:var(--text-faint); color:var(--text); }
+  .filters button.active{ background:var(--panel-2); color:var(--text); border-color:var(--text-faint); }
+  .btn-conta{ background:#7c3aed !important; color:white !important; border-color:#8b5cf6 !important; font-weight:600; }
+  .btn-conta:hover{ background:#6d28d9 !important; }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:14px; margin-bottom:18px; }
+
+  .eq-card{
+    display:block; text-decoration:none; color:inherit;
+    background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:18px;
+    transition:border-color .2s, transform .15s;
+  }
+  .eq-card:hover{ border-color:var(--text-faint); transform:translateY(-2px); }
+  .eq-card[data-status="falha"]{ border-color:var(--red-dim); }
+  .eq-card[data-status="atencao"]{ border-color:var(--amber-dim); }
+  .eq-card[data-status="desconectada"]{ border-color:var(--red-dim); opacity: 0.75; }
+  
+  .eq-head{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
+  .eq-head h3{ font-family:'Rajdhani',sans-serif; font-size:18px; font-weight:600; }
+  .eq-head .tag{ font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .status-pill{
+    font-size:10px; text-transform:uppercase; letter-spacing:.5px; padding:4px 9px;
+    border-radius:12px; font-weight:600; white-space:nowrap; display:flex; align-items:center; gap:5px;
+  }
+  .status-pill .d{ width:6px; height:6px; border-radius:50%; }
+  .status-pill.operacional{ background:rgba(53,208,127,.12); color:var(--green); } .status-pill.operacional .d{ background:var(--green); }
+  .status-pill.atencao{ background:rgba(242,169,59,.12); color:var(--amber); } .status-pill.atencao .d{ background:var(--amber); animation:pulse 1.2s infinite; }
+  .status-pill.falha{ background:rgba(239,86,84,.12); color:var(--red); } .status-pill.falha .d{ background:var(--red); animation:pulse .8s infinite; }
+  .status-pill.manutencao{ background:rgba(79,163,227,.12); color:var(--blue); } .status-pill.manutencao .d{ background:var(--blue); }
+  .status-pill.desconectada{ background:rgba(239,86,84,.12); color:var(--red); } .status-pill.desconectada .d{ background:var(--red); }
+
+  .eq-foot{
+    display:flex; justify-content:space-between; align-items:center; padding-top:10px;
+    border-top:1px solid var(--border); font-size:11px; color:var(--text-faint);
+  }
+  .eq-foot .ver{ color:var(--blue); font-weight:600; }
+
+  .log-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:16px 18px; }
+  .log-panel h2{ font-family:'Rajdhani',sans-serif; font-size:15px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-dim); margin-bottom:10px; }
+  .log-list{ display:flex; flex-direction:column; gap:0; max-height:220px; overflow-y:auto; }
+  .log-item{ display:flex; gap:10px; align-items:center; padding:7px 0; border-bottom:1px solid var(--border); font-size:12px; }
+  .log-item:last-child{ border-bottom:none; }
+  .log-item .t{ color:var(--text-faint); width:66px; flex-shrink:0; }
+  .log-item .b{ width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .log-item.ok .b{ background:var(--green); } .log-item.warn .b{ background:var(--amber); } .log-item.err .b{ background:var(--red); }
+  .log-item .msg{ color:var(--text-dim); }
+  .log-item .msg b{ color:var(--text); font-weight:500; }
+
+  .modal{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; z-index:1000; padding:20px; }
+  .modal-content{ background:var(--panel); border:1px solid var(--border); border-radius:8px; width:100%; max-width:450px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+  .modal-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:10px; }
+  .modal-header h2{ font-family:'Rajdhani', sans-serif; font-size:20px; color:#c084fc; }
+  .close-btn{ background:none; border:none; color:var(--text-dim); font-size:20px; cursor:pointer; }
+  .bill-details{ display:flex; flex-direction:column; gap:10px; font-size:14px; margin-bottom:20px; }
+  .bill-row{ display:flex; justify-content:space-between; border-bottom:1px dashed var(--border); padding-bottom:6px; }
+  .bill-total{ display:flex; justify-content:space-between; font-size:18px; font-weight:bold; color:var(--green); margin-top:10px; border-top:2px solid var(--border); padding-top:10px; }
+
+  ::-webkit-scrollbar{ width:6px; } ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
+
+  @media (max-width:768px){
+    .summary{ grid-template-columns:repeat(2,1fr); }
+    header{ flex-direction:column; align-items:flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="dot" id="mqtt-dot"></div>
+    <div>
+      <h1>Painel de Monitoramento</h1>
+      <p>SM Plásticos</p>
+    </div>
+  </div>
+  <div class="head-right">
+    <div id="clock" class="mono">Atualizado às <span id="clock-time">--:--:--</span></div>
+    <button class="btn-logout" id="btn-logout">Sair</button>
+  </div>
+</header>
+
+<div class="summary">
+  <div class="card op"><div class="num" id="cnt-op">0</div><div class="lbl">Operacional</div></div>
+  <div class="card at"><div class="num" id="cnt-at">0</div><div class="lbl">Atenção</div></div>
+  <div class="card fa"><div class="num" id="cnt-fa">0</div><div class="lbl">Falha</div></div>
+  <div class="card ma"><div class="num" id="cnt-ma">0</div><div class="lbl">Manutenção</div></div>
+  <div class="card bill"><div class="num" id="val-conta">R$ 0,00</div><div class="lbl">Consumo Parcial</div></div>
+</div>
+
+<div class="filters" id="filters">
+  <div class="filter-btns" id="filter-btns">
+    <button class="active" data-f="todos">Todos</button>
+    <button data-f="operacional">Operacional</button>
+    <button data-f="atencao">Atenção</button>
+    <button data-f="falha">Falha</button>
+    <button data-f="manutencao">Manutenção</button>
+    <button data-f="desconectada">Desconectada</button>
+  </div>
+  <button class="btn-conta" id="btn-gerar-conta">📄 Gerar Conta / Fatura</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="log-panel">
+  <h2>Registro de eventos</h2>
+  <div class="log-list" id="log-list"></div>
+</div>
+
+<!-- MODAL DA CONTA -->
+<div class="modal" id="modalConta">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Fatura Simulada — Motor MT-01</h2>
+      <button class="close-btn" id="closeModal">&times;</button>
+    </div>
+    <div class="bill-details">
+      <div class="bill-row"><span>Tempo de Execução:</span> <span class="mono" id="modal-tempo">0 min</span></div>
+      <div class="bill-row"><span>Corrente Média Lida:</span> <span class="mono" id="modal-corrente">0 A</span></div>
+      <div class="bill-row"><span>Energia Consumida (kWh):</span> <span class="mono" id="modal-kwh">0.00 kWh</span></div>
+      <div class="bill-row"><span>Tarifa Aplicada (R$/kWh):</span> <span class="mono">R$ 0,85</span></div>
+      <div class="bill-total"><span>Total Estimado:</span> <span class="mono" id="modal-total">R$ 0,00</span></div>
+    </div>
+    <button style="width:100%; padding:10px; background:#7c3aed; color:white; border:none; border-radius:4px; font-weight:600; cursor:pointer;" id="btnPrint">Imprimir / Fechar</button>
+  </div>
+</div>
+
+<script>
+// --- Controle de acesso: exige login válido para ver este painel ---------
+if (sessionStorage.getItem('painel_logado') !== 'true') {
+  window.location.href = 'login.html';
+}
+document.getElementById('btn-logout').addEventListener('click', () => {
+  sessionStorage.removeItem('painel_logado');
+  window.location.href = 'login.html';
+});
+
+const STATUS_LABEL = { 
+  operacional: 'Operacional', 
+  atencao: 'Atenção', 
+  falha: 'Falha', 
+  manutencao: 'Manutenção',
+  desconectada: 'Desconectada' 
+};
+
+// Acumuladores para a Conta / Fatura
+let kwhAcumulado = 0;
+let correnteAtualGlobal = 0;
+
+// Variáveis para controle de timeout/desconexão da máquina principal (MT-01)
+let timeoutDesconexao = null;
+const TEMPO_LIMITE_MS = 6000; // 6 segundos sem mensagens = considerada desconectada
+
+let equipamentos = [
+  { id:'MT-01', nome:'Carnevalle', local:'Bloco B', status:'desconectada',
+    metrics:[ {k:'corr', val:0.0, warn:55.0, danger:60.0},
+              {k:'VLT',  val:0.0, warn:240.0, danger:250.0},
+              {k:'RPM',  val:0, warn:2100, danger:2200} ] },
+  { id:'TR-02', nome:'Bomba de água', local:'Casa de bomba', status:'operacional',
+    metrics:[ {k:'corr', val:0.0, warn:55, danger:60},
+              {k:'VLT',  val:220, warn:240, danger:250},
+              {k:'RPM',  val:1800, warn:2100, danger:2200} ] },
+  { id:'INV-03', nome:'Motor de grãos', local:'Fábrica 01', status:'operacional',
+    metrics:[ {k:'corr', val:0.0, warn:55, danger:60},
+              {k:'VLT',  val:220, warn:240, danger:250},
+              {k:'RPM',  val:1800, warn:2100, danger:2200} ] }
+];
+
+let eventos = [];
+let activeFilter = 'todos';
+
+function renderCard(eq){
+  return `
+  <a class="eq-card" data-status="${eq.status}" data-id="${eq.id}" href="detalhe.html?id=${encodeURIComponent(eq.id)}">
+    <div class="eq-head">
+      <div>
+        <h3>${eq.nome}</h3>
+        <div class="tag">${eq.id} · ${eq.local}</div>
+      </div>
+      <div class="status-pill ${eq.status}"><span class="d"></span>${STATUS_LABEL[eq.status]}</div>
+    </div>
+    <div class="eq-foot">
+      <span class="mono" id="ts-${eq.id}">${eq.status === 'desconectada' ? 'Sem sinal recente' : 'Última leitura: agora'}</span>
+      <span class="ver">Ver detalhes →</span>
+    </div>
+  </a>`;
+}
+
+function renderGrid(){
+  const grid = document.getElementById('grid');
+  const visiveis = equipamentos.filter(eq => activeFilter === 'todos' || eq.status === activeFilter);
+  grid.innerHTML = visiveis.map(renderCard).join('');
+}
+
+function renderSummary(){
+  document.getElementById('cnt-op').textContent = equipamentos.filter(e=>e.status==='operacional').length;
+  document.getElementById('cnt-at').textContent = equipamentos.filter(e=>e.status==='atencao').length;
+  document.getElementById('cnt-fa').textContent = equipamentos.filter(e=>e.status==='falha').length;
+  document.getElementById('cnt-ma').textContent = equipamentos.filter(e=>e.status==='manutencao').length;
+  const custoTotal = kwhAcumulado * 0.85;
+  document.getElementById('val-conta').textContent = `R$ ${custoTotal.toFixed(2)}`;
+}
+
+function addEvento(tipo, msg){
+  const now = new Date();
+  const t = now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  eventos.unshift({ tipo, msg, t });
+  eventos = eventos.slice(0, 30);
+  renderLog();
+}
+
+function renderLog(){
+  const list = document.getElementById('log-list');
+  list.innerHTML = eventos.map(ev => `
+    <div class="log-item ${ev.tipo}">
+      <span class="t mono">${ev.t}</span>
+      <span class="b"></span>
+      <span class="msg">${ev.msg}</span>
+    </div>`).join('');
+}
+
+function updateClock(){
+  document.getElementById('clock-time').textContent = new Date().toLocaleTimeString('pt-BR');
+}
+
+// --- CONEXÃO MQTT VIA WEBSOCKET (COM WATCHDOG DE DESCONEXÃO) ---
+const brokerUrl = 'wss://broker.hivemq.com:8884/mqtt';
+const client = mqtt.connect(brokerUrl);
+const topico = 'sm_wortex_projeto/leituras';
+
+client.on('connect', function () {
+  document.getElementById('mqtt-dot').style.background = 'var(--green)';
+  addEvento('ok', 'Conectado ao broker MQTT na nuvem com sucesso');
+  client.subscribe(topico);
+});
+
+client.on('message', function (topic, payload) {
+  if (topic === topico) {
+    try {
+      const dados = JSON.parse(payload.toString());
+
+      if (dados.corrente !== undefined) correnteAtualGlobal = dados.corrente;
+
+      const motor = equipamentos.find(e => e.id === 'MT-01');
+      if (motor) {
+        if (dados.corrente !== undefined) motor.metrics[0].val = dados.corrente;
+        if (dados.tensao !== undefined)   motor.metrics[1].val = dados.tensao;
+
+        let worst = 'operacional';
+        motor.metrics.forEach(m => {
+          if (m.val >= m.danger) worst = 'falha';
+          else if (m.val >= m.warn && worst !== 'falha') worst = 'atencao';
+        });
+        motor.status = worst;
+
+        salvarLeituraCompartilhada('MT-01', dados);
+      }
+
+      renderGrid();
+      renderSummary();
+
+      // --- WATCHDOG: Reseta o temporizador a cada mensagem recebida ---
+      clearTimeout(timeoutDesconexao);
+      timeoutDesconexao = setTimeout(() => {
+        marcarMaquinaDesconectada('MT-01');
+      }, TEMPO_LIMITE_MS);
+
+    } catch (e) {
+      console.error('Erro ao processar o JSON do MQTT:', e);
+    }
+  }
+});
+
+// Função acionada caso a ESP32 pare de enviar dados (Timeout atingido)
+function marcarMaquinaDesconectada(id) {
+  const motor = equipamentos.find(e => e.id === id);
+  if (motor) {
+    motor.status = 'desconectada';
+    motor.metrics[0].val = 0.0;
+    correnteAtualGlobal = 0.0;
+    renderGrid();
+    renderSummary();
+    addEvento('err', `Máquina ${id} ficou sem sinal e foi marcada como Desconectada.`);
+  }
+}
+
+// Guarda as últimas leituras em localStorage
+function salvarLeituraCompartilhada(id, dados){
+  const chave = 'leituras_' + id;
+  let historico = JSON.parse(localStorage.getItem(chave) || '[]');
+  historico.push({ t: Date.now(), corrente: dados.corrente, tensao: dados.tensao });
+  historico = historico.slice(-40);
+  localStorage.setItem(chave, JSON.stringify(historico));
+}
+
+// Filtros de tela
+document.getElementById('filter-btns').addEventListener('click', e => {
+  if (e.target.tagName !== 'BUTTON') return;
+  document.querySelectorAll('#filter-btns button').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  activeFilter = e.target.dataset.f;
+  renderGrid();
+});
+
+// Controle do Modal de Geração de Conta
+const modal = document.getElementById('modalConta');
+document.getElementById('btn-gerar-conta').addEventListener('click', () => {
+  document.getElementById('modal-corrente').textContent = correnteAtualGlobal.toFixed(2) + ' A';
+  document.getElementById('modal-kwh').textContent = kwhAcumulado.toFixed(3) + ' kWh';
+  const total = kwhAcumulado * 0.85;
+  document.getElementById('modal-total').textContent = `R$ ${total.toFixed(2)}`;
+  document.getElementById('modal-tempo').textContent = 'Sessão ativa';
+  modal.style.display = 'flex';
+});
+document.getElementById('closeModal').addEventListener('click', () => modal.style.display = 'none');
+document.getElementById('btnPrint').addEventListener('click', () => modal.style.display = 'none');
+
+renderGrid();
+renderSummary();
+addEvento('ok', 'Painel web industrial iniciado');
+updateClock();
+setInterval(updateClock, 1000);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acesso — Painel de Monitoramento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E141B; --panel:#161F29; --panel-2:#1C2733; --border:#28323E;
+    --text:#E7ECF2; --text-dim:#8CA0B3; --text-faint:#5A6B7B;
+    --green:#35D07F; --red:#EF5654; --grid:#1E2833;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 28px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/28px 100%,
+      var(--bg);
+    color:var(--text); font-family:'Inter', sans-serif;
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+  .box{
+    width:100%; max-width:360px; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:28px 26px; box-shadow:0 10px 30px rgba(0,0,0,.4);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; margin-bottom:22px; }
+  .brand .dot{ width:10px; height:10px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .brand h1{ font-family:'Rajdhani', sans-serif; font-weight:700; font-size:19px; text-transform:uppercase; letter-spacing:.5px; }
+  .brand p{ color:var(--text-dim); font-size:11px; }
+
+  label{ display:block; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; margin-top:14px; }
+  input{
+    width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text);
+    padding:10px 12px; border-radius:5px; font-size:14px; font-family:'Inter',sans-serif; outline:none;
+  }
+  input:focus{ border-color:var(--green); }
+
+  .btn{
+    width:100%; margin-top:22px; padding:11px; background:var(--green); color:#08130D; border:none;
+    border-radius:5px; font-weight:700; font-size:14px; cursor:pointer; letter-spacing:.3px;
+    text-transform:uppercase; transition:.15s;
+  }
+  .btn:hover{ filter:brightness(1.08); }
+
+  .err{
+    margin-top:14px; font-size:12px; color:var(--red); background:rgba(239,86,84,.1);
+    border:1px solid rgba(239,86,84,.3); padding:8px 10px; border-radius:5px; display:none;
+  }
+  .hint{ margin-top:18px; font-size:10.5px; color:var(--text-faint); text-align:center; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div class="box">
+  <div class="brand">
+    <div class="dot"></div>
+    <div>
+      <h1>Painel de Monitoramento</h1>
+      <p>SM Plásticos — acesso restrito</p>
+    </div>
+  </div>
+
+  <form id="loginForm">
+    <label for="usuario">Usuário</label>
+    <input type="text" id="usuario" autocomplete="username" required>
+
+    <label for="senha">Senha</label>
+    <input type="password" id="senha" autocomplete="current-password" required>
+
+    <button type="submit" class="btn">Entrar</button>
+    <div class="err" id="erroMsg">Usuário ou senha inválidos.</div>
+  </form>
+
+  <div class="hint mono">
+    Credenciais de demonstração: admin / sm2026<br>
+    Altere-as em login.html antes de usar em produção.
+  </div>
+</div>
+
+<script>
+  // --- Credenciais de demonstração (client-side) ---------------------------
+  // Isso é apenas uma validação simples no navegador, útil para uso interno
+  // ou protótipo. Para um controle de acesso real, o ideal é validar o
+  // usuário/senha em um backend (ex.: Node-RED com autenticação de sessão).
+  const USUARIO_VALIDO = 'admin';
+  const SENHA_VALIDA   = 'sm2026';
+
+  document.getElementById('loginForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    const usuario = document.getElementById('usuario').value.trim();
+    const senha   = document.getElementById('senha').value;
+    const erro    = document.getElementById('erroMsg');
+
+    if (usuario === USUARIO_VALIDO && senha === SENHA_VALIDA) {
+      sessionStorage.setItem('painel_logado', 'true');
+      window.location.href = 'painel.html';
+    } else {
+      erro.style.display = 'block';
+    }
+  });
+
+  // Se já estiver logado, pula direto para o painel
+  if (sessionStorage.getItem('painel_logado') === 'true') {
+    window.location.href = 'painel.html';
+  }
+</script>
+
+</body>
+</html>
